@@ -1,0 +1,241 @@
+class MyHomePage extends StatefulWidget {
+  const MyHomePage({Key? key, required this.title});
+
+  final String title;
+
+  @override
+  State<MyHomePage> createState() => _MyHomePageState();
+}
+
+class _MyHomePageState extends State<MyHomePage> {
+  List<ParseObject> gameList = [];
+  bool _isLoading = false;
+  int pageKey = 0;
+  int _pageSize = 15;
+  final double _scrollThreshold = 200.0;
+  bool isLoading = false;
+  bool isLoadingMore = false;
+  ScrollController _scrollController = ScrollController();
+  TextEditingController _searchController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    fetchGameList();
+    _scrollController.addListener(_scrollListener);
+  }
+
+  void _scrollListener() {
+    if (_scrollController.offset >=
+            _scrollController.position.maxScrollExtent &&
+        !_scrollController.position.outOfRange &&
+        !isLoadingMore) {
+      loadMoreData();
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> fetchGameList({String? searchQuery}) async {
+    if (_isLoading) return;
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    final queryBuilder = QueryBuilder<ParseObject>(ParseObject('Gry'))
+      ..orderByDescending('objectId')
+      ..setLimit(_pageSize)
+      ..setAmountToSkip(pageKey * _pageSize);
+
+    if (searchQuery != null && searchQuery.isNotEmpty) {
+      queryBuilder.whereContains('Nazwa', searchQuery);
+    }
+
+    final response = await queryBuilder.query();
+
+    if (response.success && response.results != null) {
+      setState(() {
+        gameList.addAll(response.results! as Iterable<ParseObject>);
+        pageKey++;
+        _isLoading = false;
+      });
+    } else {
+      print(response.error?.message);
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> loadMoreData() async {
+    if (!isLoading) {
+      setState(() {
+        isLoadingMore = true;
+      });
+      await fetchGameList();
+      setState(() {
+        isLoadingMore = false;
+      });
+    }
+  }
+
+  void refreshListBySearchQuery() async {
+    setState(() {
+      gameList.clear();
+      pageKey = 0;
+    });
+    await fetchGameList(searchQuery: _searchController.text);
+  }
+
+  void navigateToSortScreen() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => SortScreen()),
+    );
+  }
+
+  void navigateToFilterScreen() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => FilterScreen()),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(widget.title),
+        actions: [
+          IconButton(
+            icon: Icon(Icons.refresh),
+            onPressed: refreshListBySearchQuery,
+          ),
+        ],
+      ),
+      body: RefreshIndicator(
+        onRefresh: () async {
+          setState(() {
+            gameList.clear();
+            pageKey = 0;
+          });
+          await fetchGameList(searchQuery: _searchController.text);
+        },
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _searchController,
+                      decoration: InputDecoration(
+                        labelText: 'Wyszukaj grę',
+                        suffixIcon: IconButton(
+                          icon: Icon(Icons.search),
+                          onPressed: refreshListBySearchQuery,
+                        ),
+                      ),
+                      onSubmitted: (value) {
+                        refreshListBySearchQuery();
+                      },
+                    ),
+                  ),
+                  SizedBox(width: 8.0),
+                  ElevatedButton(
+                    onPressed: navigateToSortScreen,
+                    child: Text('Sortuj'),
+                  ),
+                  SizedBox(width: 8.0),
+                  ElevatedButton(
+                    onPressed: navigateToFilterScreen,
+                    child: Text('Filtruj'),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: gameList.isEmpty
+                  ? Center(
+                      child: Text('No games found'),
+                    )
+                  : ListView.builder(
+                      controller: _scrollController,
+                      itemCount: gameList.length + 1,
+                      itemBuilder: (BuildContext context, int index) {
+                        if (index == gameList.length) {
+                          return Padding(
+                            padding: const EdgeInsets.all(8.0),
+                            child: Center(
+                              child: isLoadingMore
+                                  ? CircularProgressIndicator()
+                                  : null,
+                            ),
+                          );
+                        } else {
+                          final ParseObject game = gameList[index];
+                          final ParseFile? image =
+                              game.get<ParseFile>('Zdjecie');
+                          String imageUrl = '';
+                          if (image != null) {
+                            imageUrl = image.url!;
+                          }
+                          return InkWell(
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => GameDetailsScreen(
+                                    game: game,
+                                    gameId: game.objectId ?? '',
+                                  ),
+                                ),
+                              );
+                            },
+                            child: AnimatedContainer(
+                              duration: Duration(milliseconds: 300),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(8.0),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black38,
+                                    blurRadius: 4.0,
+                                    offset: Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                              child: ListTile(
+                                leading: ClipOval(
+                                  child: FadeInImage(
+                                    placeholder:
+                                        AssetImage('assets/loader.gif'),
+                                    image: CachedNetworkImageProvider(
+                                      imageUrl,
+                                    ),
+                                    fit: BoxFit.cover,
+                                    width: 40.0,
+                                    height: 40.0,
+                                  ),
+                                ),
+                                title: Text(game.get<String>('Nazwa') ?? ''),
+                              ),
+                            ),
+                          );
+                        }
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
